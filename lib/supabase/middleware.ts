@@ -41,6 +41,7 @@ export async function updateSession(request: NextRequest) {
     pathname.startsWith("/api/webhooks") ||
     pathname.startsWith("/api/health") ||
     pathname.startsWith("/api/sms/remind") ||
+    pathname.startsWith("/api/quickbooks/callback") ||
     pathname === "/payment-success";
 
   if (!user && !isPublicPath) {

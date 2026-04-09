@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { InvoiceDetailClient } from "./invoice-detail-client";
+import { qboConfigured } from "@/lib/quickbooks";
 
 interface Props { params: Promise<{ id: string }> }
 
@@ -29,6 +30,7 @@ export default async function InvoiceDetailPage({ params }: Props) {
       .select(`
         id, invoice_number, status, amount, tax_rate, tax_amount, total,
         due_date, paid_date, created_at, notes, stripe_payment_link, line_items,
+        qbo_invoice_id, qbo_sync_status, qbo_synced_at, qbo_sync_error,
         customers(name, phone, email, address, city, state, zip),
         jobs(title)
       `)
@@ -60,6 +62,11 @@ export default async function InvoiceDetailPage({ params }: Props) {
         created_at: invoice.created_at,
         notes: invoice.notes,
         stripe_payment_link: invoice.stripe_payment_link,
+        qbo_invoice_id:  (invoice as unknown as { qbo_invoice_id?: string }).qbo_invoice_id  ?? null,
+        qbo_sync_status: (invoice as unknown as { qbo_sync_status?: string }).qbo_sync_status ?? null,
+        qbo_synced_at:   (invoice as unknown as { qbo_synced_at?:  string }).qbo_synced_at   ?? null,
+        qbo_sync_error:  (invoice as unknown as { qbo_sync_error?:  string }).qbo_sync_error  ?? null,
+        showQBO: qboConfigured,
         line_items: (Array.isArray(invoice.line_items) ? invoice.line_items : []) as LI[],
         customer: invoice.customers as unknown as { name: string; phone: string | null; email: string | null; address: string | null; city: string | null; state: string | null; zip: string | null } | null,
         job_title: (invoice.jobs as unknown as { title: string } | null)?.title ?? null,

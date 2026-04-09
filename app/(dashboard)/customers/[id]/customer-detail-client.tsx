@@ -39,6 +39,7 @@ import {
   type CustomerFormState,
 } from "../customer-actions";
 import type { Customer } from "@/types/database";
+import { QBOSyncButton } from "@/components/qbo-sync-button";
 
 const JOB_STATUS_COLORS: Record<string, string> = {
   scheduled: "bg-blue-100 text-blue-700",
@@ -103,12 +104,14 @@ interface CustomerDetailClientProps {
   customer: Customer;
   jobs: JobRow[];
   invoices: InvoiceRow[];
+  showQBO?: boolean;
 }
 
 export function CustomerDetailClient({
   customer,
   jobs,
   invoices,
+  showQBO = false,
 }: CustomerDetailClientProps) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -247,7 +250,15 @@ export function CustomerDetailClient({
           )}
         </div>
 
-        <div className="flex gap-2 shrink-0">
+        <div className="flex gap-2 shrink-0 flex-wrap">
+          {showQBO && (
+            <QBOSyncButton
+              type="customer"
+              id={customer.id}
+              syncStatus={(customer as unknown as { qbo_customer_id?: string }).qbo_customer_id ? "synced" : null}
+              syncedAt={(customer as unknown as { qbo_synced_at?: string }).qbo_synced_at ?? null}
+            />
+          )}
           <Button
             size="sm"
             variant="outline"

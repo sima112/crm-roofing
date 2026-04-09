@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/ui/use-toast";
 import { Loader2, CheckCircle2, XCircle, ExternalLink, RefreshCw, Unplug } from "lucide-react";
+import { QBOSyncButton } from "@/components/qbo-sync-button";
 
 interface QBOStatus {
   connected: boolean;
@@ -116,6 +117,16 @@ export function QuickBooksTab({ status, justConnected, errorCode }: QuickBooksTa
               </div>
 
               <div className="flex flex-wrap gap-2">
+                <QBOSyncButton
+                  type="full"
+                  syncedAt={status.lastSyncAt}
+                />
+                <Button variant="outline" size="sm" asChild>
+                  <a href="/api/quickbooks/connect">
+                    <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+                    Reconnect
+                  </a>
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
@@ -128,12 +139,6 @@ export function QuickBooksTab({ status, justConnected, errorCode }: QuickBooksTa
                   ) : (
                     <><Unplug className="w-3.5 h-3.5 mr-1.5" />Disconnect</>
                   )}
-                </Button>
-                <Button variant="outline" size="sm" asChild>
-                  <a href="/api/quickbooks/connect">
-                    <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-                    Reconnect
-                  </a>
                 </Button>
               </div>
             </>

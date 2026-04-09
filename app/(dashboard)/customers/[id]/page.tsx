@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { CustomerDetailClient } from "./customer-detail-client";
+import { qboConfigured } from "@/lib/quickbooks";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -51,6 +52,7 @@ export default async function CustomerDetailPage({ params }: Props) {
       customer={customer}
       jobs={jobs ?? []}
       invoices={invoices ?? []}
+      showQBO={qboConfigured}
     />
   );
 }

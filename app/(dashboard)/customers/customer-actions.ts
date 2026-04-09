@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { qboConfigured } from "@/lib/quickbooks";
+import { syncCustomerToQBO } from "@/lib/quickbooks-sync";
 
 // ── Add customer ─────────────────────────────────────────────────────────────
 
@@ -46,6 +48,30 @@ export async function addCustomerAction(
 
   if (error) return { error: error.message, success: false };
 
+  // Auto-sync to QBO if connected
+  if (qboConfigured) {
+    const { data: bizData } = await supabase
+      .from("businesses")
+      .select("id, qbo_sync_enabled")
+      .eq("owner_id", user.id)
+      .maybeSingle();
+    const b = bizData as { id: string; qbo_sync_enabled: boolean } | null;
+    if (b?.qbo_sync_enabled) {
+      // Get the inserted customer id
+      const admin = createAdminClient();
+      const { data: newCust } = await admin
+        .from("customers")
+        .select("id")
+        .eq("business_id", b.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (newCust) {
+        syncCustomerToQBO(b.id, (newCust as { id: string }).id).catch(() => {});
+      }
+    }
+  }
+
   revalidatePath("/customers");
   return { error: null, success: true };
 }
@@ -78,6 +104,20 @@ export async function updateCustomerAction(
     .eq("id", id);
 
   if (error) return { error: error.message, success: false };
+
+  // Auto-sync updated customer to QBO if connected
+  if (qboConfigured) {
+    const admin = createAdminClient();
+    const { data: cust } = await admin
+      .from("customers")
+      .select("business_id, businesses(id, qbo_sync_enabled)")
+      .eq("id", id)
+      .maybeSingle();
+    const custData = cust as { business_id: string; businesses: { id: string; qbo_sync_enabled: boolean } | null } | null;
+    if (custData?.businesses?.qbo_sync_enabled) {
+      syncCustomerToQBO(custData.business_id, id).catch(() => {});
+    }
+  }
 
   revalidatePath(`/customers/${id}`);
   revalidatePath("/customers");

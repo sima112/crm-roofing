@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/dialog";
 import { changeInvoiceStatusAction, deleteInvoiceAction, sendInvoiceSMSAction } from "./invoice-actions";
 import { useToast } from "@/components/ui/use-toast";
+import { QBOStatusBadge } from "@/components/qbo-status-badge";
 
 export type InvoiceRow = {
   id: string;
@@ -53,6 +54,10 @@ export type InvoiceRow = {
   customer_name: string;
   job_title: string | null;
   stripe_payment_link: string | null;
+  qbo_sync_status:  string | null;
+  qbo_synced_at:    string | null;
+  qbo_sync_error:   string | null;
+  qbo_invoice_id:   string | null;
 };
 
 type Tab = "all" | "draft" | "sent" | "paid" | "overdue";
@@ -83,9 +88,10 @@ interface InvoicesClientProps {
     paidThisMonth: number;
     overdueCount: number;
   };
+  showQBO?: boolean;
 }
 
-export function InvoicesClient({ invoices, summaryCards }: InvoicesClientProps) {
+export function InvoicesClient({ invoices, summaryCards, showQBO = false }: InvoicesClientProps) {
   const router = useRouter();
   const { toast } = useToast();
   const [, startTransition] = useTransition();
@@ -224,6 +230,7 @@ export function InvoicesClient({ invoices, summaryCards }: InvoicesClientProps) 
                 <TableHead className="text-right">Total</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="hidden md:table-cell">Due</TableHead>
+                {showQBO && <TableHead className="hidden md:table-cell w-10 text-center">QB</TableHead>}
                 <TableHead className="w-8" />
               </TableRow>
             </TableHeader>
@@ -264,6 +271,16 @@ export function InvoicesClient({ invoices, summaryCards }: InvoicesClientProps) 
                   <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
                     {fmtDate(inv.due_date)}
                   </TableCell>
+                  {showQBO && (
+                    <TableCell className="hidden md:table-cell text-center" onClick={(e) => e.stopPropagation()}>
+                      <QBOStatusBadge
+                        status={inv.qbo_sync_status}
+                        error={inv.qbo_sync_error}
+                        syncedAt={inv.qbo_synced_at}
+                        qboId={inv.qbo_invoice_id}
+                      />
+                    </TableCell>
+                  )}
                   <TableCell onClick={(e) => e.stopPropagation()}>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>

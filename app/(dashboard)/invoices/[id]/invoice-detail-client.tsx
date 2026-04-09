@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { changeInvoiceStatusAction, sendInvoiceSMSAction } from "../invoice-actions";
 import { useToast } from "@/components/ui/use-toast";
+import { QBOSyncButton } from "@/components/qbo-sync-button";
 
 type LineItem = {
   description: string;
@@ -45,6 +46,11 @@ type InvoiceDetailData = {
   created_at: string;
   notes: string | null;
   stripe_payment_link: string | null;
+  qbo_invoice_id:  string | null;
+  qbo_sync_status: string | null;
+  qbo_synced_at:   string | null;
+  qbo_sync_error:  string | null;
+  showQBO:         boolean;
   line_items: LineItem[];
   customer: {
     name: string;
@@ -142,10 +148,20 @@ export function InvoiceDetailClient({ invoice }: InvoiceDetailClientProps) {
           </Link>
         </Button>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${STATUS_STYLES[invoice.status] ?? "bg-slate-100"}`}>
             {invoice.status}
           </span>
+
+          {invoice.showQBO && (
+            <QBOSyncButton
+              type="invoice"
+              id={invoice.id}
+              syncStatus={invoice.qbo_sync_status}
+              syncedAt={invoice.qbo_synced_at}
+              syncError={invoice.qbo_sync_error}
+            />
+          )}
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

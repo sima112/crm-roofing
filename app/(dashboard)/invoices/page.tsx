@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { InvoicesClient, type InvoiceRow } from "./invoices-client";
+import { qboConfigured } from "@/lib/quickbooks";
 
 export const metadata: Metadata = { title: "Invoices" };
 
@@ -18,24 +19,29 @@ export default async function InvoicesPage() {
     .select(`
       id, invoice_number, status, amount, tax_amount, total,
       due_date, paid_date, created_at, stripe_payment_link,
+      qbo_sync_status, qbo_synced_at, qbo_sync_error, qbo_invoice_id,
       customers(name),
       jobs(title)
     `)
     .order("created_at", { ascending: false });
 
   const rows: InvoiceRow[] = (invoices ?? []).map((inv) => ({
-    id: inv.id,
-    invoice_number: inv.invoice_number,
-    status: inv.status,
-    amount: Number(inv.amount ?? 0),
-    tax_amount: Number(inv.tax_amount ?? 0),
-    total: Number(inv.total ?? 0),
-    due_date: inv.due_date,
-    paid_date: inv.paid_date,
-    created_at: inv.created_at,
+    id:                 inv.id,
+    invoice_number:     inv.invoice_number,
+    status:             inv.status,
+    amount:             Number(inv.amount ?? 0),
+    tax_amount:         Number(inv.tax_amount ?? 0),
+    total:              Number(inv.total ?? 0),
+    due_date:           inv.due_date,
+    paid_date:          inv.paid_date,
+    created_at:         inv.created_at,
     stripe_payment_link: inv.stripe_payment_link,
-    customer_name: (inv.customers as unknown as { name: string } | null)?.name ?? "—",
-    job_title: (inv.jobs as unknown as { title: string } | null)?.title ?? null,
+    customer_name:      (inv.customers as unknown as { name: string } | null)?.name ?? "—",
+    job_title:          (inv.jobs as unknown as { title: string } | null)?.title ?? null,
+    qbo_sync_status:    (inv as unknown as { qbo_sync_status?: string }).qbo_sync_status ?? null,
+    qbo_synced_at:      (inv as unknown as { qbo_synced_at?: string }).qbo_synced_at ?? null,
+    qbo_sync_error:     (inv as unknown as { qbo_sync_error?: string }).qbo_sync_error ?? null,
+    qbo_invoice_id:     (inv as unknown as { qbo_invoice_id?: string }).qbo_invoice_id ?? null,
   }));
 
   const outstanding = rows
@@ -59,6 +65,7 @@ export default async function InvoicesPage() {
       <InvoicesClient
         invoices={rows}
         summaryCards={{ outstanding, paidThisMonth, overdueCount }}
+        showQBO={qboConfigured}
       />
     </div>
   );

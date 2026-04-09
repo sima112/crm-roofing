@@ -5,6 +5,8 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendSMS } from "@/lib/sms";
+import { qboConfigured } from "@/lib/quickbooks";
+import { syncInvoiceToQBO } from "@/lib/quickbooks-sync";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -62,6 +64,19 @@ export async function createInvoiceAction(
     .single();
 
   if (error) return { error: error.message, success: false };
+
+  // Auto-sync to QBO if connected and status is sent
+  if (qboConfigured && status === "sent") {
+    const bizData = business as { id: string; qbo_sync_enabled?: boolean };
+    const { data: biz } = await supabase
+      .from("businesses")
+      .select("qbo_sync_enabled")
+      .eq("id", (bizData).id)
+      .maybeSingle();
+    if ((biz as { qbo_sync_enabled?: boolean } | null)?.qbo_sync_enabled) {
+      syncInvoiceToQBO((bizData).id, data.id).catch(() => {}); // non-blocking
+    }
+  }
 
   revalidatePath("/invoices");
   redirect(`/invoices/${data.id}`);
@@ -138,6 +153,24 @@ export async function changeInvoiceStatusAction(
 
     // Schedule payment reminder 7 days from now (if still unpaid)
     await schedulePaymentReminder(supabase, id, paymentLink);
+  }
+
+  // Auto-sync to QBO when marked as sent
+  if (qboConfigured && (status === "sent" || status === "paid")) {
+    try {
+      const admin2 = createAdminClient();
+      const { data: biz } = await admin2
+        .from("invoices")
+        .select("business_id, businesses(qbo_sync_enabled)")
+        .eq("id", id)
+        .maybeSingle();
+      const bizData = biz as { business_id: string; businesses: { qbo_sync_enabled: boolean } | null } | null;
+      if (bizData?.businesses?.qbo_sync_enabled) {
+        syncInvoiceToQBO(bizData.business_id, id).catch(() => {}); // non-blocking
+      }
+    } catch {
+      // Non-fatal
+    }
   }
 
   revalidatePath(`/invoices/${id}`);

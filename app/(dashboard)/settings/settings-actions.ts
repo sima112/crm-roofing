@@ -120,6 +120,49 @@ export async function changePasswordAction(
   return { error: null };
 }
 
+// ── QBO sync settings ─────────────────────────────────────────────────────────
+
+export type QBOSyncSettings = {
+  auto_sync_invoices:  boolean;
+  auto_sync_customers: boolean;
+  pull_payments:       boolean;
+};
+
+export async function saveQBOSyncSettingsAction(
+  settings: QBOSyncSettings
+): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { error } = await supabase
+    .from("businesses")
+    .update({ qbo_sync_settings: settings } as never)
+    .eq("owner_id", user.id);
+
+  if (error) return { error: error.message };
+  revalidatePath("/settings");
+  return { error: null };
+}
+
+export async function getQBOSyncSettingsAction(): Promise<QBOSyncSettings> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("businesses")
+    .select("qbo_sync_settings")
+    .single();
+
+  const defaultSettings: QBOSyncSettings = {
+    auto_sync_invoices:  true,
+    auto_sync_customers: true,
+    pull_payments:       true,
+  };
+
+  const raw = (data as { qbo_sync_settings?: unknown } | null)?.qbo_sync_settings;
+  if (!raw || typeof raw !== "object") return defaultSettings;
+  return { ...defaultSettings, ...(raw as Partial<QBOSyncSettings>) };
+}
+
 export async function deleteAccountAction(): Promise<void> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();

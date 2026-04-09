@@ -3,11 +3,11 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ProfileTab }      from "./profile-tab";
+import { ProfileTab }       from "./profile-tab";
 import { NotificationsTab } from "./notifications-tab";
-import { BillingTab }      from "./billing-tab";
-import { AccountTab }      from "./account-tab";
-import { QuickBooksTab }   from "./quickbooks-tab";
+import { BillingTab }       from "./billing-tab";
+import { AccountTab }       from "./account-tab";
+import { QuickBooksTab }    from "./quickbooks-tab";
 import {
   getBusinessProfileAction,
   getReminderSettingsAction,
@@ -21,7 +21,7 @@ export default async function SettingsPage({
 }: {
   searchParams: Promise<{ tab?: string; connected?: string; error?: string }>;
 }) {
-  const params = await searchParams;
+  const params   = await searchParams;
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
@@ -33,40 +33,79 @@ export default async function SettingsPage({
 
   if (!business) redirect("/login");
 
-  // Determine active tab — default to "profile", honour ?tab= from QBO callback
-  const validTabs = ["profile", "notifications", "billing", "account", "quickbooks"];
+  const validTabs  = ["profile", "notifications", "billing", "account", "quickbooks"];
   const defaultTab = validTabs.includes(params.tab ?? "") ? (params.tab ?? "profile") : "profile";
 
-  // QBO connection status
+  // ── QBO status ──────────────────────────────────────────────────────────────
+  type SyncLogEntry = {
+    id: string; entity_type: string; direction: string;
+    status: string; error_message: string | null; qbo_id: string | null; created_at: string;
+  };
+
   let qboStatus = {
-    connected:   false,
-    syncEnabled: false,
-    connectedAt: null as string | null,
-    lastSyncAt:  null as string | null,
-    realmId:     null as string | null,
+    connected:    false,
+    connectedAt:  null as string | null,
+    lastSyncAt:   null as string | null,
+    realmId:      null as string | null,
+    companyName:  null as string | null,
+    syncSettings: { auto_sync_invoices: true, auto_sync_customers: true, pull_payments: true },
+    syncLog:      [] as SyncLogEntry[],
+    errorCount:   0,
   };
 
   if (qboConfigured) {
     const admin = createAdminClient();
+
     const { data: biz } = await admin
       .from("businesses")
-      .select("qbo_realm_id, qbo_sync_enabled, qbo_connected_at, qbo_last_sync_at")
+      .select(`
+        id, qbo_realm_id, qbo_sync_enabled, qbo_connected_at,
+        qbo_last_sync_at, qbo_company_name, qbo_sync_settings
+      `)
       .eq("owner_id", user.id)
       .single();
 
     if (biz) {
-      const bizData = biz as {
-        qbo_realm_id: string | null;
-        qbo_sync_enabled: boolean;
-        qbo_connected_at: string | null;
-        qbo_last_sync_at: string | null;
+      const b = biz as {
+        id: string;
+        qbo_realm_id:      string | null;
+        qbo_sync_enabled:  boolean;
+        qbo_connected_at:  string | null;
+        qbo_last_sync_at:  string | null;
+        qbo_company_name:  string | null;
+        qbo_sync_settings: { auto_sync_invoices?: boolean; auto_sync_customers?: boolean; pull_payments?: boolean } | null;
       };
+
+      const connected = !!b.qbo_realm_id && b.qbo_sync_enabled;
+
+      let syncLog: SyncLogEntry[] = [];
+      let errorCount = 0;
+
+      if (connected) {
+        const { data: logs } = await admin
+          .from("sync_log")
+          .select("id, entity_type, direction, status, error_message, qbo_id, created_at")
+          .eq("business_id", b.id)
+          .order("created_at", { ascending: false })
+          .limit(20);
+
+        syncLog = (logs ?? []) as SyncLogEntry[];
+        errorCount = syncLog.filter((l) => l.status === "error").length;
+      }
+
       qboStatus = {
-        connected:   !!bizData.qbo_realm_id && bizData.qbo_sync_enabled,
-        syncEnabled: bizData.qbo_sync_enabled,
-        connectedAt: bizData.qbo_connected_at,
-        lastSyncAt:  bizData.qbo_last_sync_at,
-        realmId:     bizData.qbo_realm_id,
+        connected,
+        connectedAt:  b.qbo_connected_at,
+        lastSyncAt:   b.qbo_last_sync_at,
+        realmId:      b.qbo_realm_id,
+        companyName:  b.qbo_company_name,
+        syncSettings: {
+          auto_sync_invoices:  b.qbo_sync_settings?.auto_sync_invoices  ?? true,
+          auto_sync_customers: b.qbo_sync_settings?.auto_sync_customers ?? true,
+          pull_payments:       b.qbo_sync_settings?.pull_payments       ?? true,
+        },
+        syncLog,
+        errorCount,
       };
     }
   }
@@ -87,8 +126,8 @@ export default async function SettingsPage({
           {qboConfigured && (
             <TabsTrigger value="quickbooks" className="text-sm">QuickBooks</TabsTrigger>
           )}
-          <TabsTrigger value="billing"       className="text-sm">Billing</TabsTrigger>
-          <TabsTrigger value="account"       className="text-sm">Account</TabsTrigger>
+          <TabsTrigger value="billing"  className="text-sm">Billing</TabsTrigger>
+          <TabsTrigger value="account"  className="text-sm">Account</TabsTrigger>
         </TabsList>
 
         <TabsContent value="profile" className="mt-0">

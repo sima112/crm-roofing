@@ -6,6 +6,7 @@ import {
   syncCustomerToQBO,
   syncInvoiceToQBO,
   fullSync,
+  pullCustomersFromQBO,
 } from "@/lib/quickbooks-sync";
 
 export const runtime = "nodejs";
@@ -69,6 +70,11 @@ export async function POST(req: NextRequest) {
     if (body.type === "full") {
       const result = await fullSync(businessId);
       return NextResponse.json(result);
+    }
+
+    if (body.type === "pull_customers") {
+      const result = await pullCustomersFromQBO(businessId);
+      return NextResponse.json({ customers_pulled: result.created + result.updated, error: result.error });
     }
 
     return NextResponse.json({ error: "Invalid type" }, { status: 400 });

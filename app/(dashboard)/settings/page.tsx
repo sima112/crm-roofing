@@ -47,7 +47,17 @@ export default async function SettingsPage() {
         </TabsContent>
 
         <TabsContent value="notifications" className="mt-0">
-          <NotificationsTab initialSettings={reminderSettings} />
+          <NotificationsTab
+            initialSettings={reminderSettings}
+            twilioConfigured={
+              !!process.env.TWILIO_ACCOUNT_SID &&
+              process.env.TWILIO_ACCOUNT_SID !== "your-sid" &&
+              !!process.env.TWILIO_AUTH_TOKEN &&
+              process.env.TWILIO_AUTH_TOKEN !== "your-token" &&
+              !!process.env.TWILIO_PHONE_NUMBER &&
+              process.env.TWILIO_PHONE_NUMBER !== "+1xxxxxxxxxx"
+            }
+          />
         </TabsContent>
 
         <TabsContent value="billing" className="mt-0">

@@ -14,9 +14,10 @@ import type { ReminderSettings } from "./reminder-defaults";
 
 interface NotificationsTabProps {
   initialSettings: ReminderSettings;
+  twilioConfigured: boolean;
 }
 
-export function NotificationsTab({ initialSettings }: NotificationsTabProps) {
+export function NotificationsTab({ initialSettings, twilioConfigured }: NotificationsTabProps) {
   const { toast } = useToast();
   const [, startTransition] = useTransition();
   const [settings, setSettings] = useState<ReminderSettings>(initialSettings);
@@ -52,19 +53,17 @@ export function NotificationsTab({ initialSettings }: NotificationsTabProps) {
     payment_reminder: "{{customer_name}}, {{business_name}}, {{invoice_number}}, {{total}}, {{payment_link}}",
   };
 
-  const twilioNote = (
-    <p className="text-sm text-muted-foreground rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 mb-6">
-      SMS reminders require{" "}
-      <code className="text-xs bg-amber-100 px-1 rounded">TWILIO_ACCOUNT_SID</code>,{" "}
-      <code className="text-xs bg-amber-100 px-1 rounded">TWILIO_AUTH_TOKEN</code>, and{" "}
-      <code className="text-xs bg-amber-100 px-1 rounded">TWILIO_PHONE_NUMBER</code>{" "}
-      in <code className="text-xs bg-amber-100 px-1 rounded">.env.local</code>.
-    </p>
-  );
-
   return (
     <div className="space-y-6 max-w-2xl">
-      {twilioNote}
+      {!twilioConfigured && (
+        <p className="text-sm text-muted-foreground rounded-lg bg-amber-50 border border-amber-200 px-4 py-3">
+          SMS reminders require{" "}
+          <code className="text-xs bg-amber-100 px-1 rounded">TWILIO_ACCOUNT_SID</code>,{" "}
+          <code className="text-xs bg-amber-100 px-1 rounded">TWILIO_AUTH_TOKEN</code>, and{" "}
+          <code className="text-xs bg-amber-100 px-1 rounded">TWILIO_PHONE_NUMBER</code>{" "}
+          in <code className="text-xs bg-amber-100 px-1 rounded">.env.local</code>.
+        </p>
+      )}
 
       <ReminderCard
         icon={<Bell className="w-4 h-4 text-blue-600" />}

@@ -51,7 +51,7 @@ export default async function SettingsPage({
     const { data: biz } = await admin
       .from("businesses")
       .select("qbo_realm_id, qbo_sync_enabled, qbo_connected_at, qbo_last_sync_at")
-      .eq("user_id", user.id)
+      .eq("owner_id", user.id)
       .single();
 
     if (biz) {

@@ -52,6 +52,6 @@ DROP POLICY IF EXISTS "Users see their own sync logs" ON sync_log;
 CREATE POLICY "Users see their own sync logs" ON sync_log
   FOR ALL USING (
     business_id = (
-      SELECT id FROM businesses WHERE user_id = auth.uid() LIMIT 1
+      SELECT id FROM businesses WHERE owner_id = auth.uid() LIMIT 1
     )
   );

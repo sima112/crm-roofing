@@ -22,7 +22,7 @@ export async function GET() {
   const { data: biz } = await admin
     .from("businesses")
     .select("id")
-    .eq("user_id", user.id)
+    .eq("owner_id", user.id)
     .single();
 
   if (!biz) return NextResponse.json({ error: "Business not found" }, { status: 404 });

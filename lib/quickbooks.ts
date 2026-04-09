@@ -202,7 +202,8 @@ export async function makeApiCall(
   if (!tokens) throw new Error("QuickBooks not connected");
 
   const { accessToken, realmId } = tokens;
-  const url = `${QBO_BASE_URL}/${realmId}/${endpoint}?minorversion=65`;
+  const sep = endpoint.includes("?") ? "&" : "?";
+  const url = `${QBO_BASE_URL}/${realmId}/${endpoint}${sep}minorversion=65`;
 
   const res = await fetch(url, {
     method,

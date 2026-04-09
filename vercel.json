@@ -1,0 +1,9 @@
+{
+  "framework": "nextjs",
+  "crons": [
+    {
+      "path": "/api/sms/remind",
+      "schedule": "*/15 * * * *"
+    }
+  ]
+}

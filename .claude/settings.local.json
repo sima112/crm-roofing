@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la c:/Users/simak/crm-roofing/.env*)",
+      "Bash(npm run:*)",
+      "Bash(taskkill /PID 3604 /F)"
+    ]
+  }
+}

@@ -120,6 +120,7 @@ export default async function DashboardPage() {
     { data: recentCustomers },
     { data: recentJobs },
     { data: recentInvoices },
+    { data: agingData },
   ] = await Promise.all([
     // Revenue: paid invoices this month
     supabase
@@ -151,11 +152,11 @@ export default async function DashboardPage() {
       .gte("completed_date", lastMonthStart)
       .lt("completed_date", lastMonthEnd),
 
-    // Outstanding: sent + overdue invoices
+    // Outstanding: unpaid invoices
     supabase
       .from("invoices")
       .select("total")
-      .in("status", ["sent", "overdue"]),
+      .in("status", ["sent", "viewed", "partial", "overdue"]),
 
     // Upcoming scheduled jobs (next 7 days)
     supabase
@@ -199,6 +200,13 @@ export default async function DashboardPage() {
       .select("id, invoice_number, status, total, paid_date, created_at, customers(name)")
       .order("created_at", { ascending: false })
       .limit(5),
+
+    // Aging: all unpaid invoices with due_date
+    supabase
+      .from("invoices")
+      .select("total, due_date, status")
+      .in("status", ["sent", "viewed", "partial", "overdue"])
+      .not("due_date", "is", null),
   ]);
 
   // ── Compute KPIs ──────────────────────────────────────────────────────────
@@ -296,6 +304,26 @@ export default async function DashboardPage() {
 
   const revPct = pct(revenueThisMonth, revenueLastMonth);
   const jobPct = pct(jobsThisMonth, jobsLastMonth);
+
+  // ── Aging buckets ─────────────────────────────────────────────────────────
+  const aging = {
+    current:  0,  // due_date >= today (not yet due)
+    d1_30:    0,  // 1-30 days overdue
+    d31_60:   0,  // 31-60 days
+    d61_90:   0,  // 61-90 days
+    d90plus:  0,  // 90+ days
+  };
+  for (const inv of agingData ?? []) {
+    const due = new Date((inv.due_date as string) + "T00:00:00");
+    const daysLate = Math.floor((now.getTime() - due.getTime()) / 86_400_000);
+    const amt = Number(inv.total ?? 0);
+    if (daysLate <= 0)      aging.current += amt;
+    else if (daysLate <= 30) aging.d1_30   += amt;
+    else if (daysLate <= 60) aging.d31_60  += amt;
+    else if (daysLate <= 90) aging.d61_90  += amt;
+    else                     aging.d90plus += amt;
+  }
+  const agingTotal = Object.values(aging).reduce((s, v) => s + v, 0);
 
   function TrendIcon({ value }: { value: number }) {
     if (value > 0)
@@ -524,7 +552,55 @@ export default async function DashboardPage() {
           </Card>
         </div>
 
-        {/* ROW 4 — Overdue Invoices (only shown if any exist) */}
+        {/* ROW 4 — AR Aging Report */}
+        {agingTotal > 0 && (
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base">Accounts Receivable Aging</CardTitle>
+                <span className="text-sm font-semibold text-muted-foreground">{fmt(agingTotal)} total</span>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {/* Stacked bar */}
+              <div className="flex h-5 rounded-full overflow-hidden mb-4 gap-px">
+                {([
+                  { key: "current", pct: agingTotal > 0 ? (aging.current / agingTotal) * 100 : 0,  color: "bg-green-400"  },
+                  { key: "d1_30",   pct: agingTotal > 0 ? (aging.d1_30   / agingTotal) * 100 : 0,  color: "bg-yellow-400" },
+                  { key: "d31_60",  pct: agingTotal > 0 ? (aging.d31_60  / agingTotal) * 100 : 0,  color: "bg-orange-400" },
+                  { key: "d61_90",  pct: agingTotal > 0 ? (aging.d61_90  / agingTotal) * 100 : 0,  color: "bg-red-500"    },
+                  { key: "d90plus", pct: agingTotal > 0 ? (aging.d90plus / agingTotal) * 100 : 0,  color: "bg-red-900"    },
+                ] as const).filter((b) => b.pct > 0).map((bucket) => (
+                  <div
+                    key={bucket.key}
+                    className={`${bucket.color} transition-all`}
+                    style={{ width: `${bucket.pct}%` }}
+                  />
+                ))}
+              </div>
+              {/* Legend */}
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                {([
+                  { label: "Current",   amount: aging.current, color: "bg-green-400"  },
+                  { label: "1–30 days", amount: aging.d1_30,   color: "bg-yellow-400" },
+                  { label: "31–60 days",amount: aging.d31_60,  color: "bg-orange-400" },
+                  { label: "61–90 days",amount: aging.d61_90,  color: "bg-red-500"    },
+                  { label: "90+ days",  amount: aging.d90plus, color: "bg-red-900"    },
+                ] as const).map((b) => (
+                  <div key={b.label} className="flex flex-col gap-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`w-2.5 h-2.5 rounded-sm shrink-0 ${b.color}`} />
+                      <span className="text-xs text-muted-foreground">{b.label}</span>
+                    </div>
+                    <span className="text-sm font-semibold tabular-nums">{fmt(b.amount)}</span>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* ROW 5 — Overdue Invoices (only shown if any exist) */}
         {overdueInvoices && overdueInvoices.length > 0 && (
           <Card className="border-destructive/30">
             <CardHeader className="pb-3">

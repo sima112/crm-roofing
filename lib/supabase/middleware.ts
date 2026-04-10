@@ -42,7 +42,12 @@ export async function updateSession(request: NextRequest) {
     pathname.startsWith("/api/health") ||
     pathname.startsWith("/api/sms/remind") ||
     pathname.startsWith("/api/quickbooks/callback") ||
-    pathname === "/payment-success";
+    pathname.startsWith("/api/cron/") ||
+    pathname.startsWith("/api/invoices/") && pathname.endsWith("/track") ||
+    pathname === "/payment-success" ||
+    pathname.startsWith("/invite/") ||
+    pathname.startsWith("/privacy") ||
+    pathname.startsWith("/terms");
 
   if (!user && !isPublicPath) {
     const url = request.nextUrl.clone();

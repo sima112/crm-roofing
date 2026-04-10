@@ -6,7 +6,6 @@ import {
   Search,
   Plus,
   ChevronRight,
-  ChevronLeft,
   UserPlus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -29,8 +28,9 @@ import {
 } from "@/components/ui/table";
 import { CustomerForm } from "./customer-form";
 import { addCustomerAction } from "./customer-actions";
+import { Pagination } from "@/components/ui/pagination";
 
-const PAGE_SIZE = 25;
+const DEFAULT_PAGE_SIZE = 25;
 
 export type CustomerRow = {
   id: string;
@@ -77,6 +77,7 @@ export function CustomersClient({ customers }: CustomersClientProps) {
   const [filter, setFilter] = useState<FilterType>("all");
   const [sort, setSort] = useState<"name" | "newest" | "jobs">("name");
   const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [dialogOpen, setDialogOpen] = useState(false);
 
   const debouncedSearch = useDebounce(search, 250);
@@ -117,8 +118,8 @@ export function CustomersClient({ customers }: CustomersClientProps) {
     return copy;
   }, [customers, filter, debouncedSearch, sort]);
 
-  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
-  const paginated = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const totalPages = Math.ceil(filtered.length / pageSize);
+  const paginated = filtered.slice(page * pageSize, (page + 1) * pageSize);
 
   const goToPage = useCallback(
     (p: number) => setPage(Math.max(0, Math.min(p, totalPages - 1))),
@@ -322,36 +323,15 @@ export function CustomersClient({ customers }: CustomersClientProps) {
             </Table>
           </div>
 
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between text-sm text-muted-foreground">
-              <span>
-                {page * PAGE_SIZE + 1}–
-                {Math.min((page + 1) * PAGE_SIZE, filtered.length)} of{" "}
-                {filtered.length} customers
-              </span>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => goToPage(page - 1)}
-                  disabled={page === 0}
-                >
-                  <ChevronLeft className="w-4 h-4 mr-1" />
-                  Previous
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => goToPage(page + 1)}
-                  disabled={page >= totalPages - 1}
-                >
-                  Next
-                  <ChevronRight className="w-4 h-4 ml-1" />
-                </Button>
-              </div>
-            </div>
-          )}
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            totalItems={filtered.length}
+            pageSize={pageSize}
+            onPageChange={goToPage}
+            onPageSizeChange={(s) => { setPageSize(s); setPage(0); }}
+            itemLabel="customers"
+          />
         </>
       )}
     </div>

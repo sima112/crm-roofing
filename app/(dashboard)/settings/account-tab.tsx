@@ -15,6 +15,7 @@ import {
 import { useToast } from "@/components/ui/use-toast";
 import { Loader2, AlertTriangle, Download } from "lucide-react";
 import { changePasswordAction, deleteAccountAction } from "./settings-actions";
+import { PasswordStrengthMeter } from "@/components/ui/password-strength";
 
 interface AccountTabProps {
   email: string;
@@ -25,8 +26,8 @@ export function AccountTab({ email }: AccountTabProps) {
   const [, startTransition] = useTransition();
 
   // Password form
-  const [currentPw, setCurrentPw] = useState("");
-  const [newPw, setNewPw] = useState("");
+  const [currentPw, setCurrentPw]   = useState("");
+  const [newPw, setNewPw]           = useState("");
   const [confirmPw, setConfirmPw] = useState("");
   const [pwSaving, setPwSaving] = useState(false);
   const [pwErrors, setPwErrors] = useState<{ current?: string; new?: string; confirm?: string }>({});
@@ -39,7 +40,7 @@ export function AccountTab({ email }: AccountTabProps) {
   const handlePasswordChange = () => {
     const errors: typeof pwErrors = {};
     if (!currentPw) errors.current = "Required";
-    if (newPw.length < 8) errors.new = "Must be at least 8 characters";
+    if (newPw.length < 10) errors.new = "Must be at least 10 characters";
     if (newPw !== confirmPw) errors.confirm = "Passwords do not match";
     if (Object.keys(errors).length) { setPwErrors(errors); return; }
 
@@ -120,7 +121,10 @@ export function AccountTab({ email }: AccountTabProps) {
             placeholder="••••••••"
             autoComplete="new-password"
           />
-          {pwErrors.new && <p className="text-xs text-destructive">{pwErrors.new}</p>}
+          {pwErrors.new
+            ? <p className="text-xs text-destructive">{pwErrors.new}</p>
+            : <PasswordStrengthMeter password={newPw} showChecklist={newPw.length > 0} />
+          }
         </div>
 
         <div className="space-y-1.5">

@@ -4,11 +4,13 @@ import { useState, useEffect, useTransition } from "react";
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, AlertCircle } from "lucide-react";
+import { Plus, Trash2, AlertCircle, RefreshCw, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { createClient } from "@/lib/supabase/client";
 import type { InvoiceFormState, LineItem } from "./invoice-actions";
 
@@ -34,17 +36,24 @@ function SubmitButton({ label }: { label: string }) {
   );
 }
 
+export interface InvoiceFormDefaults {
+  customer_id:       string;
+  job_id?:           string | null;
+  due_date?:         string | null;
+  notes?:            string | null;
+  line_items?:       LineItem[];
+  deposit_required?: boolean;
+  deposit_amount?:   number | null;
+  recurring?:        boolean;
+  recurring_interval?: string | null;
+  recurring_end_date?: string | null;
+}
+
 interface InvoiceFormProps {
   action: (prev: InvoiceFormState, formData: FormData) => Promise<InvoiceFormState>;
   defaultCustomerId?: string;
   defaultJobId?: string;
-  defaultValues?: {
-    customer_id: string;
-    job_id?: string | null;
-    due_date?: string | null;
-    notes?: string | null;
-    line_items?: LineItem[];
-  };
+  defaultValues?: InvoiceFormDefaults;
 }
 
 export function InvoiceForm({
@@ -72,6 +81,18 @@ export function InvoiceForm({
       : [{ description: "", quantity: 1, unit_price: 0, amount: 0 }]
   );
 
+  // ── Deposit state ─────────────────────────────────────────────────────────
+  const [depositEnabled, setDepositEnabled] = useState(defaultValues?.deposit_required ?? false);
+  const [depositPct, setDepositPct] = useState(50); // percent of total for quick-set
+  const [depositAmtStr, setDepositAmtStr] = useState(
+    defaultValues?.deposit_amount != null ? String(defaultValues.deposit_amount) : ""
+  );
+
+  // ── Recurring state ───────────────────────────────────────────────────────
+  const [recurringEnabled, setRecurringEnabled] = useState(defaultValues?.recurring ?? false);
+  const [recurringInterval, setRecurringInterval] = useState(defaultValues?.recurring_interval ?? "monthly");
+  const [recurringEndDate, setRecurringEndDate] = useState(defaultValues?.recurring_end_date ?? "");
+
   // Load customers
   useEffect(() => {
     createClient()
@@ -97,7 +118,6 @@ export function InvoiceForm({
     if (!selectedJobId) return;
     const job = jobs.find((j) => j.id === selectedJobId);
     if (!job?.estimated_amount) return;
-    // Only pre-fill if the form is fresh (single empty row)
     if (lineItems.length === 1 && !lineItems[0].description && lineItems[0].unit_price === 0) {
       setLineItems([{
         description: job.title,
@@ -114,30 +134,43 @@ export function InvoiceForm({
       const rows = [...prev];
       const row = { ...rows[i] };
       if (field === "description") row.description = value;
-      if (field === "quantity") row.quantity = Math.max(0, parseFloat(value) || 0);
-      if (field === "unit_price") row.unit_price = Math.max(0, parseFloat(value) || 0);
+      if (field === "quantity")    row.quantity  = Math.max(0, parseFloat(value) || 0);
+      if (field === "unit_price")  row.unit_price = Math.max(0, parseFloat(value) || 0);
       row.amount = row.quantity * row.unit_price;
       rows[i] = row;
       return rows;
     });
   };
 
-  const addLine = () =>
-    setLineItems((prev) => [...prev, { description: "", quantity: 1, unit_price: 0, amount: 0 }]);
-
-  const removeLine = (i: number) =>
-    setLineItems((prev) => prev.filter((_, idx) => idx !== i));
+  const addLine   = () => setLineItems((p) => [...p, { description: "", quantity: 1, unit_price: 0, amount: 0 }]);
+  const removeLine = (i: number) => setLineItems((p) => p.filter((_, idx) => idx !== i));
 
   const subtotal = lineItems.reduce((s, li) => s + li.amount, 0);
-  const taxRate = 0.0825;
-  const tax = subtotal * taxRate;
-  const total = subtotal + tax;
+  const taxRate  = 0.0825;
+  const tax      = subtotal * taxRate;
+  const total    = subtotal + tax;
+
+  // Sync deposit amount when pct changes
+  useEffect(() => {
+    if (depositEnabled && !depositAmtStr) {
+      setDepositAmtStr((total * depositPct / 100).toFixed(2));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [total, depositPct, depositEnabled]);
+
+  const depositAmount = parseFloat(depositAmtStr) || 0;
+  const balanceAmount = Math.max(0, total - depositAmount);
 
   const wrappedAction = async (prev: InvoiceFormState, formData: FormData) => {
-    formData.set("line_items", JSON.stringify(lineItems));
-    formData.set("customer_id", selectedCustomerId);
+    formData.set("line_items",        JSON.stringify(lineItems));
+    formData.set("customer_id",       selectedCustomerId);
     if (selectedJobId) formData.set("job_id", selectedJobId);
-    formData.set("send_now", String(sendNow));
+    formData.set("send_now",          String(sendNow));
+    formData.set("deposit_required",  String(depositEnabled));
+    formData.set("deposit_amount",    depositEnabled ? String(depositAmount) : "0");
+    formData.set("recurring",         String(recurringEnabled));
+    formData.set("recurring_interval", recurringInterval);
+    formData.set("recurring_end_date", recurringEndDate || "");
     const result = await action(prev, formData);
     if (result.success) {
       startTransition(() => router.refresh());
@@ -203,7 +236,6 @@ export function InvoiceForm({
       <div className="space-y-3">
         <Label>Line Items</Label>
         <div className="rounded-xl border overflow-hidden">
-          {/* Header */}
           <div className="hidden sm:grid grid-cols-[1fr_80px_100px_100px_40px] gap-2 bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground">
             <span>Description</span>
             <span className="text-center">Qty</span>
@@ -222,10 +254,7 @@ export function InvoiceForm({
               <Input
                 value={li.quantity === 0 ? "" : String(li.quantity)}
                 onChange={(e) => updateLine(i, "quantity", e.target.value)}
-                type="number"
-                min="0"
-                step="any"
-                placeholder="1"
+                type="number" min="0" step="any" placeholder="1"
                 className="h-8 text-sm text-center"
               />
               <div className="relative">
@@ -233,16 +262,11 @@ export function InvoiceForm({
                 <Input
                   value={li.unit_price === 0 ? "" : String(li.unit_price)}
                   onChange={(e) => updateLine(i, "unit_price", e.target.value)}
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  placeholder="0.00"
+                  type="number" min="0" step="0.01" placeholder="0.00"
                   className="h-8 text-sm pl-6 text-right"
                 />
               </div>
-              <div className="text-sm font-medium text-right py-1 pr-1 tabular-nums">
-                {fmt(li.amount)}
-              </div>
+              <div className="text-sm font-medium text-right py-1 pr-1 tabular-nums">{fmt(li.amount)}</div>
               <button
                 type="button"
                 onClick={() => removeLine(i)}
@@ -276,6 +300,129 @@ export function InvoiceForm({
             <span className="text-primary tabular-nums">{fmt(total)}</span>
           </div>
         </div>
+      </div>
+
+      {/* ── Deposit ─────────────────────────────────────────────────────────── */}
+      <div className="rounded-xl border p-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Layers className="w-4 h-4 text-muted-foreground" />
+            <div>
+              <p className="text-sm font-medium">Require Deposit</p>
+              <p className="text-xs text-muted-foreground">Split into deposit + balance payment</p>
+            </div>
+          </div>
+          <Switch
+            checked={depositEnabled}
+            onCheckedChange={(v) => {
+              setDepositEnabled(v);
+              if (v && !depositAmtStr) {
+                setDepositAmtStr((total * depositPct / 100).toFixed(2));
+              }
+            }}
+          />
+        </div>
+
+        {depositEnabled && (
+          <div className="space-y-3 pt-2 border-t">
+            <div className="flex items-center gap-2">
+              <Label className="shrink-0 text-xs">Quick set:</Label>
+              {[25, 50, 75].map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => {
+                    setDepositPct(p);
+                    setDepositAmtStr((total * p / 100).toFixed(2));
+                  }}
+                  className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                    Math.abs(depositAmount - total * p / 100) < 0.01
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "border-input text-muted-foreground hover:border-primary"
+                  }`}
+                >
+                  {p}%
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Deposit Amount</Label>
+                <div className="relative">
+                  <span className="absolute left-3 top-2 text-sm text-muted-foreground">$</span>
+                  <Input
+                    type="number"
+                    min="0"
+                    max={total}
+                    step="0.01"
+                    className="pl-7 h-8 text-sm"
+                    value={depositAmtStr}
+                    onChange={(e) => setDepositAmtStr(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Balance Due</Label>
+                <div className="h-8 flex items-center px-3 rounded-md border bg-muted/40 text-sm font-medium tabular-nums text-muted-foreground">
+                  {fmt(balanceAmount)}
+                </div>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Two Stripe payment links will be generated: one for the deposit, one for the balance.
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* ── Recurring ───────────────────────────────────────────────────────── */}
+      <div className="rounded-xl border p-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <RefreshCw className="w-4 h-4 text-muted-foreground" />
+            <div>
+              <p className="text-sm font-medium">Make Recurring</p>
+              <p className="text-xs text-muted-foreground">Auto-generate the next invoice when this one is paid</p>
+            </div>
+          </div>
+          <Switch
+            checked={recurringEnabled}
+            onCheckedChange={setRecurringEnabled}
+          />
+        </div>
+
+        {recurringEnabled && (
+          <div className="space-y-3 pt-2 border-t">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Interval</Label>
+                <Select value={recurringInterval} onValueChange={setRecurringInterval}>
+                  <SelectTrigger className="h-8 text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="monthly">Monthly</SelectItem>
+                    <SelectItem value="quarterly">Quarterly (every 3 months)</SelectItem>
+                    <SelectItem value="semi_annual">Semi-Annual (every 6 months)</SelectItem>
+                    <SelectItem value="annual">Annual</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">End Date <span className="text-muted-foreground">(optional)</span></Label>
+                <Input
+                  type="date"
+                  className="h-8 text-sm"
+                  value={recurringEndDate}
+                  onChange={(e) => setRecurringEndDate(e.target.value)}
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              After payment, a new invoice will be automatically scheduled for the next interval.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Notes */}

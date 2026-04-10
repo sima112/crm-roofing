@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { getStripe } from "@/lib/stripe";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { transitionInvoice } from "@/lib/invoice-transition";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,39 +31,41 @@ export async function POST(req: NextRequest) {
 
   switch (event.type) {
     case "checkout.session.completed": {
-      const session = event.data.object as Stripe.Checkout.Session;
+      const session   = event.data.object as Stripe.Checkout.Session;
       const invoiceId = session.metadata?.invoice_id;
       if (invoiceId) {
-        const { error } = await supabase
+        // Also store the stripe_invoice_id
+        await supabase
           .from("invoices")
-          .update({
-            status: "paid",
-            paid_date: new Date().toISOString(),
-            stripe_invoice_id: (session.payment_intent as string) ?? null,
-          } as never)
+          .update({ stripe_invoice_id: (session.payment_intent as string) ?? null } as never)
           .eq("id", invoiceId);
-        if (error) {
-          console.error("[stripe webhook] Failed to mark invoice paid:", error.message);
-        } else {
-          console.log(`[stripe webhook] Invoice ${invoiceId} marked as paid`);
-        }
+
+        const { error } = await transitionInvoice(invoiceId, "paid", {
+          note:             "Payment confirmed via Stripe",
+          paymentMethod:    "stripe",
+          paymentReference: session.payment_intent as string ?? undefined,
+          changedBy:        "stripe",
+        });
+        if (error) console.error("[stripe webhook] Failed to mark invoice paid:", error);
+        else console.log(`[stripe webhook] Invoice ${invoiceId} marked as paid`);
       }
       break;
     }
 
     case "payment_intent.succeeded": {
-      // Fallback: handle direct PaymentIntent success too
-      const pi = event.data.object as Stripe.PaymentIntent;
+      const pi        = event.data.object as Stripe.PaymentIntent;
       const invoiceId = pi.metadata?.invoice_id;
       if (invoiceId) {
         await supabase
           .from("invoices")
-          .update({
-            status: "paid",
-            paid_date: new Date().toISOString(),
-            stripe_invoice_id: pi.id,
-          } as never)
+          .update({ stripe_invoice_id: pi.id } as never)
           .eq("id", invoiceId);
+        await transitionInvoice(invoiceId, "paid", {
+          note:             "Payment confirmed via Stripe",
+          paymentMethod:    "stripe",
+          paymentReference: pi.id,
+          changedBy:        "stripe",
+        });
       }
       break;
     }

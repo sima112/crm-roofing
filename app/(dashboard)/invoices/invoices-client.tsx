@@ -4,42 +4,25 @@ import { useState, useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  MoreHorizontal,
-  Eye,
-  Pencil,
-  Send,
-  CheckCircle,
-  Download,
-  Trash2,
-  Link as LinkIcon,
-  Plus,
-  MessageSquare,
+  MoreHorizontal, Eye, Pencil, Send, CheckCircle, Download,
+  Trash2, Link as LinkIcon, Plus, MessageSquare,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
+  Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { changeInvoiceStatusAction, deleteInvoiceAction, sendInvoiceSMSAction } from "./invoice-actions";
 import { useToast } from "@/components/ui/use-toast";
 import { QBOStatusBadge } from "@/components/qbo-status-badge";
+import { InvoiceStatusBadge } from "@/components/invoice-status-badge";
+import { Pagination } from "@/components/ui/pagination";
 
 export type InvoiceRow = {
   id: string;
@@ -54,21 +37,19 @@ export type InvoiceRow = {
   customer_name: string;
   job_title: string | null;
   stripe_payment_link: string | null;
+  partial_paid_amount: number | null;
+  recurring: boolean;
+  recurring_interval: string | null;
+  recurring_next_date: string | null;
   qbo_sync_status:  string | null;
   qbo_synced_at:    string | null;
   qbo_sync_error:   string | null;
   qbo_invoice_id:   string | null;
 };
 
-type Tab = "all" | "draft" | "sent" | "paid" | "overdue";
+type Tab = "all" | "draft" | "sent" | "viewed" | "partial" | "paid" | "overdue" | "disputed" | "recurring";
 
-const STATUS_STYLES: Record<string, string> = {
-  draft: "bg-slate-100 text-slate-600",
-  sent: "bg-blue-100 text-blue-700",
-  paid: "bg-green-100 text-green-700",
-  overdue: "bg-red-100 text-red-700",
-  cancelled: "bg-slate-100 text-slate-400",
-};
+const DEFAULT_PAGE_SIZE = 25;
 
 function fmt(n: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
@@ -96,20 +77,34 @@ export function InvoicesClient({ invoices, summaryCards, showQBO = false }: Invo
   const { toast } = useToast();
   const [, startTransition] = useTransition();
   const [tab, setTab] = useState<Tab>("all");
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   const filtered = useMemo(() => {
-    const rows = tab === "all" ? invoices : invoices.filter((inv) => inv.status === tab);
+    const rows = tab === "all" ? invoices
+      : tab === "recurring" ? invoices.filter((inv) => inv.recurring)
+      : invoices.filter((inv) => inv.status === tab);
     return [...rows].sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
   }, [invoices, tab]);
 
+  // Reset to page 0 when tab changes
+  useMemo(() => { setPage(0); }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const totalPages = Math.ceil(filtered.length / pageSize);
+  const paginated  = filtered.slice(page * pageSize, (page + 1) * pageSize);
+
   const counts = useMemo(() => {
-    const c: Record<Tab, number> = { all: invoices.length, draft: 0, sent: 0, paid: 0, overdue: 0 };
+    const c: Record<Tab, number> = {
+      all: invoices.length, draft: 0, sent: 0, viewed: 0,
+      partial: 0, paid: 0, overdue: 0, disputed: 0, recurring: 0,
+    };
     for (const inv of invoices) {
       if (inv.status in c) (c as Record<string, number>)[inv.status]++;
+      if (inv.recurring) c.recurring++;
     }
     return c;
   }, [invoices]);
@@ -130,10 +125,7 @@ export function InvoicesClient({ invoices, summaryCards, showQBO = false }: Invo
 
   const handleCopyLink = (link: string) => {
     navigator.clipboard.writeText(link).then(() => {
-      toast({
-        title: "Payment link copied!",
-        description: "Send it to your customer via text or email.",
-      });
+      toast({ title: "Payment link copied!", description: "Send it to your customer via text or email." });
     }).catch(() => {});
   };
 
@@ -147,11 +139,15 @@ export function InvoicesClient({ invoices, summaryCards, showQBO = false }: Invo
   };
 
   const TABS: { value: Tab; label: string }[] = [
-    { value: "all", label: "All" },
-    { value: "draft", label: "Draft" },
-    { value: "sent", label: "Sent" },
-    { value: "paid", label: "Paid" },
-    { value: "overdue", label: "Overdue" },
+    { value: "all",       label: "All"       },
+    { value: "draft",     label: "Draft"     },
+    { value: "sent",      label: "Sent"      },
+    { value: "viewed",    label: "Viewed"    },
+    { value: "partial",   label: "Partial"   },
+    { value: "paid",      label: "Paid"      },
+    { value: "overdue",   label: "Overdue"   },
+    { value: "disputed",  label: "Disputed"  },
+    { value: "recurring", label: "Recurring" },
   ];
 
   return (
@@ -183,25 +179,35 @@ export function InvoicesClient({ invoices, summaryCards, showQBO = false }: Invo
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-3">
         {/* Status tabs */}
-        <div className="flex gap-1 overflow-x-auto">
-          {TABS.map(({ value, label }) => (
-            <button
-              key={value}
-              onClick={() => setTab(value)}
-              className={`px-3 py-1.5 rounded-full text-xs font-medium border whitespace-nowrap transition-colors ${
-                tab === value
-                  ? "bg-primary text-primary-foreground border-primary"
-                  : "border-input text-muted-foreground hover:border-primary hover:text-foreground"
-              }`}
-            >
-              {label}
-              <span className={`ml-1.5 rounded-full px-1.5 py-0 text-[10px] font-medium ${
-                tab === value ? "bg-primary-foreground/20 text-primary-foreground" : "bg-muted text-muted-foreground"
-              }`}>
-                {counts[value]}
-              </span>
-            </button>
-          ))}
+        <div className="flex gap-1 overflow-x-auto pb-1">
+          {TABS.map(({ value, label }) => {
+            const count = counts[value];
+            const isOverdue = value === "overdue" && count > 0;
+            return (
+              <button
+                key={value}
+                onClick={() => setTab(value)}
+                className={`relative px-3 py-1.5 rounded-full text-xs font-medium border whitespace-nowrap transition-colors ${
+                  tab === value
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : isOverdue
+                      ? "border-red-300 text-red-700 hover:border-red-500"
+                      : "border-input text-muted-foreground hover:border-primary hover:text-foreground"
+                }`}
+              >
+                {label}
+                <span className={`ml-1.5 rounded-full px-1.5 py-0 text-[10px] font-medium ${
+                  tab === value
+                    ? "bg-primary-foreground/20 text-primary-foreground"
+                    : isOverdue
+                      ? "bg-red-100 text-red-700"
+                      : "bg-muted text-muted-foreground"
+                }`}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
         <Button size="sm" asChild>
@@ -218,6 +224,7 @@ export function InvoicesClient({ invoices, summaryCards, showQBO = false }: Invo
           <p className="text-sm text-muted-foreground">No invoices found</p>
         </div>
       ) : (
+        <>
         <div className="rounded-xl border overflow-hidden">
           <Table>
             <TableHeader>
@@ -235,7 +242,7 @@ export function InvoicesClient({ invoices, summaryCards, showQBO = false }: Invo
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((inv) => (
+              {paginated.map((inv) => (
                 <TableRow
                   key={inv.id}
                   className="cursor-pointer hover:bg-muted/50 transition-colors"
@@ -244,29 +251,26 @@ export function InvoicesClient({ invoices, summaryCards, showQBO = false }: Invo
                   <TableCell className="font-mono text-sm font-semibold">
                     {inv.invoice_number}
                   </TableCell>
-                  <TableCell className="text-sm font-medium">
-                    {inv.customer_name}
-                  </TableCell>
+                  <TableCell className="text-sm font-medium">{inv.customer_name}</TableCell>
                   <TableCell className="hidden lg:table-cell text-sm text-muted-foreground max-w-[180px] truncate">
                     {inv.job_title ?? "—"}
                   </TableCell>
                   <TableCell className="text-right text-sm hidden sm:table-cell tabular-nums">
-                    {fmt(Number(inv.amount))}
+                    {fmt(inv.amount)}
                   </TableCell>
                   <TableCell className="text-right text-sm hidden md:table-cell text-muted-foreground tabular-nums">
-                    {fmt(Number(inv.tax_amount))}
+                    {fmt(inv.tax_amount)}
                   </TableCell>
                   <TableCell className="text-right text-sm font-semibold tabular-nums">
-                    {fmt(Number(inv.total))}
+                    {fmt(inv.total)}
                   </TableCell>
                   <TableCell>
-                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                      inv.status === "cancelled"
-                        ? "line-through text-slate-400 bg-slate-100"
-                        : STATUS_STYLES[inv.status] ?? "bg-slate-100 text-slate-600"
-                    }`}>
-                      {inv.status}
-                    </span>
+                    <InvoiceStatusBadge
+                      status={inv.status}
+                      partialPaidAmount={inv.partial_paid_amount ?? undefined}
+                      total={inv.total}
+                      dueDate={inv.due_date}
+                    />
                   </TableCell>
                   <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
                     {fmtDate(inv.due_date)}
@@ -298,12 +302,12 @@ export function InvoicesClient({ invoices, summaryCards, showQBO = false }: Invo
                           </DropdownMenuItem>
                         )}
                         <DropdownMenuSeparator />
-                        {inv.status !== "sent" && inv.status !== "paid" && inv.status !== "cancelled" && (
+                        {inv.status === "draft" && (
                           <DropdownMenuItem onClick={() => handleStatus(inv.id, "sent")}>
                             <Send className="mr-2 h-4 w-4" />Mark as Sent
                           </DropdownMenuItem>
                         )}
-                        {inv.status !== "paid" && inv.status !== "cancelled" && (
+                        {(inv.status === "sent" || inv.status === "viewed" || inv.status === "overdue") && (
                           <DropdownMenuItem onClick={() => handleStatus(inv.id, "paid")}>
                             <CheckCircle className="mr-2 h-4 w-4" />Mark as Paid
                           </DropdownMenuItem>
@@ -338,6 +342,16 @@ export function InvoicesClient({ invoices, summaryCards, showQBO = false }: Invo
             </TableBody>
           </Table>
         </div>
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          totalItems={filtered.length}
+          pageSize={pageSize}
+          onPageChange={setPage}
+          onPageSizeChange={(s) => { setPageSize(s); setPage(0); }}
+          itemLabel="invoices"
+        />
+        </>
       )}
 
       {/* Delete confirmation */}

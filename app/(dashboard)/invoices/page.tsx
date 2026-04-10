@@ -19,6 +19,7 @@ export default async function InvoicesPage() {
     .select(`
       id, invoice_number, status, amount, tax_amount, total,
       due_date, paid_date, created_at, stripe_payment_link,
+      partial_paid_amount, recurring, recurring_interval, recurring_next_date,
       qbo_sync_status, qbo_synced_at, qbo_sync_error, qbo_invoice_id,
       customers(name),
       jobs(title)
@@ -38,6 +39,11 @@ export default async function InvoicesPage() {
     stripe_payment_link: inv.stripe_payment_link,
     customer_name:      (inv.customers as unknown as { name: string } | null)?.name ?? "—",
     job_title:          (inv.jobs as unknown as { title: string } | null)?.title ?? null,
+    partial_paid_amount: (inv as unknown as { partial_paid_amount?: number | null }).partial_paid_amount != null
+      ? Number((inv as unknown as { partial_paid_amount?: number | null }).partial_paid_amount) : null,
+    recurring:           (inv as unknown as { recurring?: boolean }).recurring ?? false,
+    recurring_interval:  (inv as unknown as { recurring_interval?: string | null }).recurring_interval ?? null,
+    recurring_next_date: (inv as unknown as { recurring_next_date?: string | null }).recurring_next_date ?? null,
     qbo_sync_status:    (inv as unknown as { qbo_sync_status?: string }).qbo_sync_status ?? null,
     qbo_synced_at:      (inv as unknown as { qbo_synced_at?: string }).qbo_synced_at ?? null,
     qbo_sync_error:     (inv as unknown as { qbo_sync_error?: string }).qbo_sync_error ?? null,
@@ -45,7 +51,7 @@ export default async function InvoicesPage() {
   }));
 
   const outstanding = rows
-    .filter((r) => r.status === "sent" || r.status === "overdue")
+    .filter((r) => ["sent", "viewed", "partial", "overdue"].includes(r.status))
     .reduce((s, r) => s + r.total, 0);
 
   const paidThisMonth = rows

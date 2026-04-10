@@ -7,6 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { sendSMS } from "@/lib/sms";
 import { qboConfigured } from "@/lib/quickbooks";
 import { syncInvoiceToQBO } from "@/lib/quickbooks-sync";
+import { transitionInvoice } from "@/lib/invoice-transition";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -43,22 +44,32 @@ export async function createInvoiceAction(
   const line_items: LineItem[] = lineItemsRaw ? JSON.parse(lineItemsRaw) : [];
   const amount = line_items.reduce((s, li) => s + li.amount, 0);
 
-  const sendNow = formData.get("send_now") === "true";
-  const status = sendNow ? "sent" : "draft";
+  const sendNow        = formData.get("send_now") === "true";
+  const status         = sendNow ? "sent" : "draft";
+  const depositRequired = formData.get("deposit_required") === "true";
+  const depositAmount  = parseFloat(formData.get("deposit_amount") as string) || 0;
+  const recurring      = formData.get("recurring") === "true";
+  const recurringInterval = (formData.get("recurring_interval") as string) || "monthly";
+  const recurringEndDate  = (formData.get("recurring_end_date") as string) || null;
 
   const { data, error } = await supabase
     .from("invoices")
     .insert({
-      business_id: business.id,
+      business_id:       business.id,
       customer_id,
-      job_id: (formData.get("job_id") as string) || null,
-      invoice_number: "", // trigger auto-generates
+      job_id:            (formData.get("job_id") as string) || null,
+      invoice_number:    "", // trigger auto-generates
       amount,
-      tax_rate: 0.0825,
+      tax_rate:          0.0825,
       status,
-      due_date: (formData.get("due_date") as string) || null,
-      notes: (formData.get("notes") as string) || null,
+      due_date:          (formData.get("due_date") as string) || null,
+      notes:             (formData.get("notes") as string) || null,
       line_items,
+      deposit_required:  depositRequired,
+      deposit_amount:    depositRequired ? depositAmount : null,
+      recurring,
+      recurring_interval: recurring ? recurringInterval : null,
+      recurring_end_date: recurring && recurringEndDate ? recurringEndDate : null,
     } as never)
     .select("id")
     .single();
@@ -95,19 +106,29 @@ export async function updateInvoiceAction(
   const line_items: LineItem[] = lineItemsRaw ? JSON.parse(lineItemsRaw) : [];
   const amount = line_items.reduce((s, li) => s + li.amount, 0);
 
-  const sendNow = formData.get("send_now") === "true";
+  const sendNow        = formData.get("send_now") === "true";
+  const depositRequired = formData.get("deposit_required") === "true";
+  const depositAmount  = parseFloat(formData.get("deposit_amount") as string) || 0;
+  const recurring      = formData.get("recurring") === "true";
+  const recurringInterval = (formData.get("recurring_interval") as string) || "monthly";
+  const recurringEndDate  = (formData.get("recurring_end_date") as string) || null;
 
   const { error } = await supabase
     .from("invoices")
     .update({
-      customer_id: formData.get("customer_id") as string,
-      job_id: (formData.get("job_id") as string) || null,
+      customer_id:       formData.get("customer_id") as string,
+      job_id:            (formData.get("job_id") as string) || null,
       amount,
-      tax_rate: 0.0825,
-      status: sendNow ? "sent" : "draft",
-      due_date: (formData.get("due_date") as string) || null,
-      notes: (formData.get("notes") as string) || null,
+      tax_rate:          0.0825,
+      status:            sendNow ? "sent" : "draft",
+      due_date:          (formData.get("due_date") as string) || null,
+      notes:             (formData.get("notes") as string) || null,
       line_items,
+      deposit_required:  depositRequired,
+      deposit_amount:    depositRequired ? depositAmount : null,
+      recurring,
+      recurring_interval: recurring ? recurringInterval : null,
+      recurring_end_date: recurring && recurringEndDate ? recurringEndDate : null,
     } as never)
     .eq("id", id);
 
@@ -122,18 +143,24 @@ export async function updateInvoiceAction(
 
 export async function changeInvoiceStatusAction(
   id: string,
-  status: string
+  status: string,
+  opts?: { note?: string; paymentMethod?: string; paymentReference?: string; partialAmount?: number; disputeReason?: string }
 ): Promise<{ error: string | null; paymentLink?: string }> {
   const supabase = await createClient();
-  const fields: Record<string, unknown> = { status };
-  if (status === "paid") fields.paid_date = new Date().toISOString();
+  const { data: { user } } = await supabase.auth.getUser();
 
-  const { error } = await supabase
-    .from("invoices")
-    .update(fields as never)
-    .eq("id", id);
+  // Use state machine transition
+  const { error } = await transitionInvoice(id, status as never, {
+    note:             opts?.note,
+    changedBy:        user?.email ?? user?.id ?? "user",
+    paymentMethod:    opts?.paymentMethod,
+    paymentReference: opts?.paymentReference,
+    partialAmount:    opts?.partialAmount,
+    disputeReason:    opts?.disputeReason,
+    sentVia:          status === "sent" ? "link" : undefined,
+  });
 
-  if (error) return { error: error.message };
+  if (error) return { error };
 
   // Auto-create Stripe payment link when marking as sent
   let paymentLink: string | undefined;
@@ -293,6 +320,168 @@ export async function deleteInvoiceAction(
   const admin = createAdminClient();
   const { error } = await admin.from("invoices").delete().eq("id", id);
   if (error) return { error: error.message };
+  revalidatePath("/invoices");
+  return { error: null };
+}
+
+// ── Waive late fee ────────────────────────────────────────────────────────────
+
+export async function waiveLateFeeAction(
+  id: string
+): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const admin = createAdminClient();
+
+  // Fetch current line items to remove the late fee entry
+  const { data: inv } = await admin
+    .from("invoices")
+    .select("line_items, amount, tax_rate")
+    .eq("id", id)
+    .single();
+
+  if (!inv) return { error: "Invoice not found" };
+
+  type LI = { description: string; quantity: number; unit_price: number; amount: number };
+  const lineItems = (Array.isArray(inv.line_items) ? inv.line_items : []) as LI[];
+  const filtered = lineItems.filter((li) => !li.description.startsWith("Late fee"));
+  const newAmount = filtered.reduce((s, li) => s + li.amount, 0);
+
+  const { error } = await admin
+    .from("invoices")
+    .update({
+      late_fee_amount:     0,
+      late_fee_applied_at: null,
+      line_items:          filtered,
+      amount:              newAmount,
+    } as never)
+    .eq("id", id);
+
+  if (error) return { error: error.message };
+
+  revalidatePath(`/invoices/${id}`);
+  revalidatePath("/invoices");
+  return { error: null };
+}
+
+// ── Cancel recurring ──────────────────────────────────────────────────────────
+
+export async function cancelRecurringAction(
+  id: string
+): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from("invoices")
+    .update({ recurring: false, recurring_next_date: null } as never)
+    .eq("id", id);
+
+  if (error) return { error: error.message };
+
+  revalidatePath(`/invoices/${id}`);
+  revalidatePath("/invoices");
+  return { error: null };
+}
+
+// ── Send invoice email ────────────────────────────────────────────────────────
+
+export async function sendInvoiceEmailAction(
+  id: string
+): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { resendConfigured, getResend } = await import("@/lib/resend");
+  if (!resendConfigured) {
+    return { error: "Email not configured — add RESEND_API_KEY to .env.local" };
+  }
+
+  const { buildInvoiceEmail } = await import("@/lib/invoice-email");
+  const admin = createAdminClient();
+
+  const [{ data: invoice }, { data: business }] = await Promise.all([
+    admin
+      .from("invoices")
+      .select(`
+        id, invoice_number, status, amount, tax_rate, tax_amount, total,
+        due_date, created_at, line_items, stripe_payment_link,
+        customers(name, email)
+      `)
+      .eq("id", id)
+      .maybeSingle(),
+    supabase
+      .from("businesses")
+      .select("name, phone, email, address")
+      .eq("owner_id", user.id)
+      .maybeSingle(),
+  ]);
+
+  if (!invoice) return { error: "Invoice not found" };
+  if (!business) return { error: "Business not found" };
+
+  type Customer = { name: string; email: string | null };
+  const customer = invoice.customers as unknown as Customer | null;
+  if (!customer?.email) return { error: "Customer has no email address on file" };
+
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  type LI = { description: string; quantity: number; unit_price: number; amount: number };
+
+  const { subject, html } = buildInvoiceEmail({
+    invoiceId:       id,
+    invoiceNumber:   invoice.invoice_number,
+    customerName:    customer.name,
+    businessName:    (business as { name: string }).name,
+    businessPhone:   (business as { phone: string | null }).phone,
+    businessEmail:   (business as { email: string | null }).email,
+    businessAddress: (business as { address: string | null }).address,
+    total:           Number(invoice.total),
+    amount:          Number(invoice.amount),
+    taxAmount:       Number(invoice.tax_amount),
+    taxRate:         Number(invoice.tax_rate),
+    dueDate:         invoice.due_date,
+    createdAt:       invoice.created_at,
+    paymentLink:     invoice.stripe_payment_link,
+    pdfLink:         `${appUrl}/api/invoices/${id}/pdf`,
+    trackingUrl:     `${appUrl}/api/invoices/${id}/track`,
+    lineItems:       (Array.isArray(invoice.line_items) ? invoice.line_items : []) as LI[],
+  });
+
+  const resend = getResend();
+  const fromAddress = process.env.RESEND_FROM_EMAIL ?? "invoices@crewbooks.app";
+
+  const { error: sendError } = await resend.emails.send({
+    from:    `${(business as { name: string }).name} via CrewBooks <${fromAddress}>`,
+    to:      customer.email,
+    subject,
+    html,
+  });
+
+  if (sendError) {
+    return { error: "Failed to send email: " + (sendError as { message?: string }).message };
+  }
+
+  // Transition to "sent" if still draft, otherwise just update sent_at
+  if (invoice.status === "draft") {
+    const { transitionInvoice } = await import("@/lib/invoice-transition");
+    await transitionInvoice(id, "sent", {
+      sentVia: "email",
+      changedBy: user.email ?? user.id,
+      note: "Sent via email",
+    });
+  } else {
+    await admin
+      .from("invoices")
+      .update({ sent_at: new Date().toISOString(), sent_via: "email" } as never)
+      .eq("id", id);
+  }
+
+  revalidatePath(`/invoices/${id}`);
   revalidatePath("/invoices");
   return { error: null };
 }

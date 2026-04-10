@@ -5,6 +5,14 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DEFAULT_SETTINGS, type ReminderSettings } from "./reminder-defaults";
 import { redirect } from "next/navigation";
+import {
+  validatePasswordComplexity,
+  checkPasswordBreached,
+  isPasswordReused,
+  recordPasswordHistory,
+  logSecurityEvent,
+  stampPasswordChangedAt,
+} from "@/lib/password-security";
 
 // ── Business profile ──────────────────────────────────────────────────────────
 
@@ -104,8 +112,22 @@ export async function changePasswordAction(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user?.email) return { error: "Not authenticated" };
 
-  if (newPassword.length < 8) {
-    return { error: "New password must be at least 8 characters" };
+  // Complexity validation
+  const complexityErrors = validatePasswordComplexity(newPassword, { email: user.email });
+  if (complexityErrors.length > 0) return { error: complexityErrors[0] };
+
+  // HIBP breach check
+  const breached = await checkPasswordBreached(newPassword);
+  if (breached) {
+    return { error: "This password has appeared in a data breach. Please choose a different password." };
+  }
+
+  const admin = createAdminClient();
+
+  // Password history check
+  const reused = await isPasswordReused(user.id, newPassword, admin);
+  if (reused) {
+    return { error: "You have used this password recently. Please choose a different password." };
   }
 
   // Verify current password by re-signing in
@@ -117,6 +139,15 @@ export async function changePasswordAction(
 
   const { error } = await supabase.auth.updateUser({ password: newPassword });
   if (error) return { error: error.message };
+
+  await recordPasswordHistory(user.id, newPassword, admin);
+  await stampPasswordChangedAt(user.id, admin);
+  await logSecurityEvent(admin, {
+    type: "password_changed",
+    userId: user.id,
+    email: user.email,
+  });
+
   return { error: null };
 }
 
@@ -161,6 +192,57 @@ export async function getQBOSyncSettingsAction(): Promise<QBOSyncSettings> {
   const raw = (data as { qbo_sync_settings?: unknown } | null)?.qbo_sync_settings;
   if (!raw || typeof raw !== "object") return defaultSettings;
   return { ...defaultSettings, ...(raw as Partial<QBOSyncSettings>) };
+}
+
+// ── Late fee settings ─────────────────────────────────────────────────────────
+
+export type LateFeeSettings = {
+  enabled:           boolean;
+  type:              "flat" | "percentage";
+  amount:            number;
+  grace_period_days: number;
+  max_late_fee:      number;
+};
+
+const DEFAULT_LATE_FEE_SETTINGS: LateFeeSettings = {
+  enabled:           false,
+  type:              "flat",
+  amount:            25,
+  grace_period_days: 7,
+  max_late_fee:      0,
+};
+
+export async function getLateFeeSettingsAction(): Promise<LateFeeSettings> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return DEFAULT_LATE_FEE_SETTINGS;
+
+  const { data } = await supabase
+    .from("businesses")
+    .select("late_fee_settings")
+    .eq("owner_id", user.id)
+    .maybeSingle();
+
+  const raw = (data as { late_fee_settings?: unknown } | null)?.late_fee_settings;
+  if (!raw || typeof raw !== "object") return DEFAULT_LATE_FEE_SETTINGS;
+  return { ...DEFAULT_LATE_FEE_SETTINGS, ...(raw as Partial<LateFeeSettings>) };
+}
+
+export async function saveLateFeeSettingsAction(
+  settings: LateFeeSettings
+): Promise<{ error: string | null }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const { error } = await supabase
+    .from("businesses")
+    .update({ late_fee_settings: settings } as never)
+    .eq("owner_id", user.id);
+
+  if (error) return { error: error.message };
+  revalidatePath("/settings");
+  return { error: null };
 }
 
 export async function deleteAccountAction(): Promise<void> {

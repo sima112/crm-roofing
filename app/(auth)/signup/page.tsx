@@ -1,34 +1,39 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import { useFormStatus } from "react-dom";
 import Link from "next/link";
-import { Wrench, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Wrench, AlertCircle } from "lucide-react";
 import { signupAction } from "@/app/(auth)/actions";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { PasswordStrengthMeter } from "@/components/ui/password-strength";
+import { checkPasswordStrength } from "@/lib/password-validation";
 
 const TRADES = [
-  { value: "roofing", label: "Roofing" },
-  { value: "hvac", label: "HVAC" },
-  { value: "plumbing", label: "Plumbing" },
+  { value: "roofing",    label: "Roofing" },
+  { value: "hvac",       label: "HVAC" },
+  { value: "plumbing",   label: "Plumbing" },
   { value: "electrical", label: "Electrical" },
-  { value: "landscaping", label: "Landscaping" },
-  { value: "general", label: "General Contractor" },
+  { value: "landscaping",label: "Landscaping" },
+  { value: "general",    label: "General Contractor" },
 ];
 
-function SubmitButton() {
+function SubmitButton({ passwordScore }: { passwordScore: number }) {
   const { pending } = useFormStatus();
+  const weak = passwordScore < 3;
   return (
-    <Button type="submit" className="w-full" disabled={pending}>
-      {pending ? "Creating account…" : "Create Account"}
+    <Button type="submit" className="w-full" disabled={pending || weak}>
+      {pending ? "Creating account…" : weak && passwordScore > 0 ? "Password too weak" : "Create Account"}
     </Button>
   );
 }
 
 export default function SignupPage() {
   const [error, action] = useActionState(signupAction, null);
+  const [password, setPassword] = useState("");
+  const passwordScore = checkPasswordStrength(password).score;
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4 py-10">
@@ -97,13 +102,9 @@ export default function SignupPage() {
                 defaultValue=""
                 className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
-                <option value="" disabled>
-                  Select your trade…
-                </option>
+                <option value="" disabled>Select your trade…</option>
                 {TRADES.map((t) => (
-                  <option key={t.value} value={t.value}>
-                    {t.label}
-                  </option>
+                  <option key={t.value} value={t.value}>{t.label}</option>
                 ))}
               </select>
             </div>
@@ -112,9 +113,7 @@ export default function SignupPage() {
             <div className="space-y-1.5">
               <Label htmlFor="phone">
                 Phone{" "}
-                <span className="text-muted-foreground font-normal">
-                  (optional)
-                </span>
+                <span className="text-muted-foreground font-normal">(optional)</span>
               </Label>
               <Input
                 id="phone"
@@ -125,7 +124,7 @@ export default function SignupPage() {
               />
             </div>
 
-            {/* Password */}
+            {/* Password + strength meter */}
             <div className="space-y-1.5">
               <Label htmlFor="password">Password</Label>
               <Input
@@ -135,14 +134,10 @@ export default function SignupPage() {
                 placeholder="••••••••"
                 autoComplete="new-password"
                 required
-                minLength={8}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
               />
-              <div className="flex items-center gap-1.5 mt-1">
-                <CheckCircle2 className="h-3.5 w-3.5 text-muted-foreground" />
-                <p className="text-xs text-muted-foreground">
-                  Must be at least 8 characters
-                </p>
-              </div>
+              <PasswordStrengthMeter password={password} showChecklist={password.length > 0} />
             </div>
 
             {/* Confirm Password */}
@@ -158,6 +153,47 @@ export default function SignupPage() {
               />
             </div>
 
+            {/* Consent checkboxes */}
+            <div className="space-y-2 pt-1">
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  name="consent_tos"
+                  required
+                  className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
+                />
+                <span className="text-xs text-muted-foreground leading-snug">
+                  I agree to the{" "}
+                  <a href="/terms" target="_blank" className="text-primary underline font-medium">Terms of Service</a>
+                  {" "}and{" "}
+                  <a href="/privacy" target="_blank" className="text-primary underline font-medium">Privacy Policy</a>
+                  {" "}<span className="text-destructive">*</span>
+                </span>
+              </label>
+
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  name="consent_marketing"
+                  className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
+                />
+                <span className="text-xs text-muted-foreground leading-snug">
+                  I&apos;d like to receive product updates and tips via email (optional)
+                </span>
+              </label>
+
+              <label className="flex items-start gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  name="consent_sms"
+                  className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
+                />
+                <span className="text-xs text-muted-foreground leading-snug">
+                  I agree to receive SMS job reminders (optional)
+                </span>
+              </label>
+            </div>
+
             {error && (
               <div className="flex gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 p-3">
                 <AlertCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
@@ -165,7 +201,7 @@ export default function SignupPage() {
               </div>
             )}
 
-            <SubmitButton />
+            <SubmitButton passwordScore={passwordScore} />
           </form>
         </div>
 

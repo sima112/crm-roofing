@@ -103,11 +103,10 @@ export async function syncCustomerToQBO(
     ...(c.email  ? { PrimaryEmailAddr: { Address: c.email } } : {}),
     ...(c.address ? {
       BillAddr: {
-        Line1:                    c.address,
-        City:                     c.city  ?? "",
-        CountrySubDivisionCode:   c.state ?? "",
-        PostalCode:               c.zip   ?? "",
-        Country:                  "US",
+        Line1: c.address,
+        ...(c.city  ? { City:                   c.city  } : {}),
+        ...(c.state ? { CountrySubDivisionCode: c.state } : {}),
+        ...(c.zip   ? { PostalCode:             c.zip   } : {}),
       },
     } : {}),
   };

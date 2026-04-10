@@ -28,28 +28,31 @@ const nextConfig: NextConfig = {
         headers: [
           // Prevent embedding in iframes (clickjacking)
           { key: "X-Frame-Options", value: "DENY" },
-          // Force HTTPS for 1 year, include subdomains
-          { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
+          // Force HTTPS for 2 years, include subdomains + preload list
+          { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
           // Stop browsers from MIME-sniffing
           { key: "X-Content-Type-Options", value: "nosniff" },
+          // Legacy XSS filter (belt-and-suspenders for older browsers)
+          { key: "X-XSS-Protection", value: "1; mode=block" },
           // Limit referrer info sent to third parties
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           // Restrict powerful browser features
           {
             key: "Permissions-Policy",
-            value: "camera=(self), microphone=(), geolocation=(self), payment=(self)",
+            value: "camera=(), microphone=(), geolocation=(), payment=(self), usb=()",
           },
-          // Basic CSP: allow self + Supabase + Stripe + Google Fonts
+          // Strict CSP: allow self + Supabase + Stripe + Twilio + OpenAI + Vercel
           {
             key: "Content-Security-Policy",
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com https://*.vercel.live",
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "font-src 'self' https://fonts.gstatic.com",
               "img-src 'self' data: blob: https://*.supabase.co",
-              "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com",
+              "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://api.openai.com https://api.twilio.com https://ip-api.com https://*.vercel.app",
               "frame-src https://js.stripe.com https://hooks.stripe.com",
+              "worker-src 'self' blob:",
             ].join("; "),
           },
         ],
